@@ -2,6 +2,7 @@ import keyboard
 import pyautogui
 import pyperclip
 from deep_translator import GoogleTranslator
+import deepl
 import threading
 import sys
 import os
@@ -14,22 +15,30 @@ from PIL import Image
 import tkinter as tk
 import re
 
+# ==========================
+# CONFIGURAÇÃO DE APPDATA
+# ==========================
 APP_NAME = "LiveTextTranslator"
-
 APPDATA_PATH = os.path.join(os.getenv("APPDATA"), APP_NAME)
 os.makedirs(APPDATA_PATH, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APPDATA_PATH, "config.json")
 HISTORY_FILE = os.path.join(APPDATA_PATH, "history.json")
 
+# ==========================
+# VARIÁVEIS GLOBAIS
+# ==========================
 ativo = True
 idioma_origem = "auto"
 hotkey_configurada = "shift+enter"
+motor_traducao = "google"
+deepl_api_key = ""
+
 tray_icon = None
 
 
 # ==========================
-# SUPORTE EXE
+# SUPORTE A EXECUTÁVEL
 # ==========================
 def resource_path(relative_path):
     try:
@@ -40,13 +49,15 @@ def resource_path(relative_path):
 
 
 # ==========================
-# CONFIG
+# CONFIGURAÇÃO
 # ==========================
 def salvar_config():
     config = {
         "ativo": ativo,
         "idioma_origem": idioma_origem,
-        "hotkey": hotkey_configurada
+        "hotkey": hotkey_configurada,
+        "motor_traducao": motor_traducao,
+        "deepl_api_key": deepl_api_key
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
@@ -54,6 +65,7 @@ def salvar_config():
 
 def carregar_config():
     global ativo, idioma_origem, hotkey_configurada
+    global motor_traducao, deepl_api_key
 
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -61,6 +73,8 @@ def carregar_config():
             ativo = config.get("ativo", True)
             idioma_origem = config.get("idioma_origem", "auto")
             hotkey_configurada = config.get("hotkey", "shift+enter")
+            motor_traducao = config.get("motor_traducao", "google")
+            deepl_api_key = config.get("deepl_api_key", "")
 
 
 # ==========================
@@ -90,20 +104,28 @@ def salvar_historico(original, traducao):
 # TRADUÇÃO
 # ==========================
 def traduzir(texto):
+    global motor_traducao, deepl_api_key
+
+    texto = texto.strip()
+
+    match = re.match(r"^(.*?)([.,!?…]+)?$", texto)
+    conteudo = match.group(1)
+    pontuacao = match.group(2) if match.group(2) else ""
+
     try:
-        texto = texto.strip()
-
-        match = re.match(r"^(.*?)([.,!?…]+)?$", texto)
-        conteudo = match.group(1)
-        pontuacao = match.group(2) if match.group(2) else ""
-
-        traducao = GoogleTranslator(
-            source=idioma_origem,
-            target="zh-CN"
-        ).translate(conteudo)
+        # 🔵 DeepL
+        if motor_traducao == "deepl" and deepl_api_key:
+            translator = deepl.Translator(deepl_api_key)
+            result = translator.translate_text(conteudo, target_lang="ZH")
+            traducao = result.text
+        else:
+            # 🟢 Google
+            traducao = GoogleTranslator(
+                source=idioma_origem,
+                target="zh-CN"
+            ).translate(conteudo)
 
         traducao_limpa = ""
-
         for c in traducao:
             if '\u4e00' <= c <= '\u9fff':
                 traducao_limpa += c
@@ -113,7 +135,15 @@ def traduzir(texto):
         return traducao_limpa + pontuacao
 
     except:
-        return texto
+        # fallback automático
+        try:
+            traducao = GoogleTranslator(
+                source=idioma_origem,
+                target="zh-CN"
+            ).translate(conteudo)
+            return traducao + pontuacao
+        except:
+            return texto
 
 
 # ==========================
@@ -125,7 +155,6 @@ def traduzir_buffer():
 
     pyautogui.sleep(0.05)
     pyautogui.hotkey("shift", "home")
-    pyautogui.sleep(0.05)
     pyautogui.hotkey("ctrl", "c")
 
     texto = pyperclip.paste().strip()
@@ -154,59 +183,71 @@ def atualizar_hotkey(nova_hotkey):
 
 
 # ==========================
+# MOTOR DE TRADUÇÃO
+# ==========================
+def usar_google(icon=None, item=None):
+    global motor_traducao
+    motor_traducao = "google"
+    salvar_config()
+    notificar("Motor: Google")
+
+
+def usar_deepl(icon=None, item=None):
+    global motor_traducao
+    if not deepl_api_key:
+        notificar("Adicione API DeepL primeiro")
+        return
+    motor_traducao = "deepl"
+    salvar_config()
+    notificar("Motor: DeepL")
+
+
+# ==========================
+# INSERIR API
+# ==========================
+def inserir_api_deepl():
+    global deepl_api_key
+
+    janela = tk.Toplevel()
+    janela.title("Inserir API DeepL")
+    janela.geometry("400x150")
+
+    tk.Label(janela, text="Cole sua API Key DeepL:").pack(pady=5)
+
+    entrada = tk.Entry(janela, width=50)
+    entrada.pack(pady=5)
+
+    def salvar():
+        global deepl_api_key
+        deepl_api_key = entrada.get().strip()
+        salvar_config()
+        notificar("API DeepL salva")
+        janela.destroy()
+
+    tk.Button(janela, text="Salvar", command=salvar).pack(pady=5)
+
+
+# ==========================
 # NOTIFICAÇÃO
 # ==========================
 def notificar(msg):
     notification.notify(
-        title="Live Text Translator v1.1.0",
+        title="Live Text Translator v1.2.0",
         message=msg,
         timeout=2
     )
 
 
 # ==========================
-# HISTÓRICO UI
-# ==========================
-def abrir_historico():
-    if not os.path.exists(HISTORY_FILE):
-        return
-
-    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-        historico = json.load(f)
-
-    janela = tk.Toplevel()
-    janela.title("Histórico")
-    janela.geometry("500x400")
-
-    texto_area = tk.Text(janela)
-    texto_area.pack(fill="both", expand=True)
-
-    for item in historico:
-        texto_area.insert("end", f"{item['data']}\n")
-        texto_area.insert("end", f"Original: {item['original']}\n")
-        texto_area.insert("end", f"Tradução: {item['traducao']}\n")
-        texto_area.insert("end", "-"*40 + "\n")
-
-
-# ==========================
-# ATIVAR
-# ==========================
-def alternar():
-    global ativo
-    ativo = not ativo
-    salvar_config()
-    notificar("Ativado ✅" if ativo else "Desativado ❌")
-
-
-# ==========================
-# TRAY
+# TRAY ICON
 # ==========================
 def iniciar_tray():
     image = Image.open(resource_path("ico_verde.ico"))
 
     menu = (
-        item("Ativar / Desativar", lambda icon, item: alternar()),
-        item("Histórico", lambda icon, item: abrir_historico()),
+        item("Motor Google", usar_google),
+        item("Motor DeepL", usar_deepl),
+        item("Inserir API DeepL", lambda icon, item: inserir_api_deepl()),
         item("Hotkey Shift+Enter", lambda icon, item: atualizar_hotkey("shift+enter")),
         item("Hotkey Ctrl+Alt+T", lambda icon, item: atualizar_hotkey("ctrl+alt+t")),
         item("Sair", lambda icon, item: sys.exit())
@@ -227,9 +268,9 @@ def main():
     threading.Thread(target=iniciar_tray, daemon=True).start()
 
     root = tk.Tk()
-    root.title("Live Text Translator v1.1.0")
-    root.geometry("300x120")
-    tk.Label(root, text="Tradutor ativo.\nUse hotkey configurada.").pack(pady=20)
+    root.title("Live Text Translator v1.2.0")
+    root.geometry("320x140")
+    tk.Label(root, text="Motor selecionável (Google / DeepL)").pack(pady=20)
     root.mainloop()
 
 
