@@ -16,7 +16,7 @@ import tkinter as tk
 import re
 
 # ==========================
-# CONFIGURAÇÃO DE APPDATA
+# APPDATA
 # ==========================
 APP_NAME = "LiveTextTranslator"
 APPDATA_PATH = os.path.join(os.getenv("APPDATA"), APP_NAME)
@@ -38,7 +38,7 @@ tray_icon = None
 
 
 # ==========================
-# SUPORTE A EXECUTÁVEL
+# SUPORTE EXE
 # ==========================
 def resource_path(relative_path):
     try:
@@ -49,7 +49,7 @@ def resource_path(relative_path):
 
 
 # ==========================
-# CONFIGURAÇÃO
+# CONFIG
 # ==========================
 def salvar_config():
     config = {
@@ -171,7 +171,7 @@ def traduzir_buffer():
 
 
 # ==========================
-# HOTKEY DINÂMICA
+# HOTKEY
 # ==========================
 def atualizar_hotkey(nova_hotkey):
     global hotkey_configurada
@@ -179,17 +179,28 @@ def atualizar_hotkey(nova_hotkey):
     hotkey_configurada = nova_hotkey
     keyboard.add_hotkey(hotkey_configurada, traduzir_buffer, suppress=True)
     salvar_config()
-    notificar(f"Hotkey alterada para {nova_hotkey}")
+    notificar(f"Hotkey: {nova_hotkey}")
 
 
 # ==========================
-# MOTOR DE TRADUÇÃO
+# MOTOR
 # ==========================
+def atualizar_icone_tray():
+    global tray_icon
+
+    if tray_icon:
+        if motor_traducao == "deepl":
+            tray_icon.icon = Image.open(resource_path("ico_deepl.ico"))
+        else:
+            tray_icon.icon = Image.open(resource_path("ico_google.ico"))
+
+
 def usar_google(icon=None, item=None):
     global motor_traducao
     motor_traducao = "google"
     salvar_config()
-    notificar("Motor: Google")
+    atualizar_icone_tray()
+    notificar("Motor ativo: Google")
 
 
 def usar_deepl(icon=None, item=None):
@@ -199,7 +210,8 @@ def usar_deepl(icon=None, item=None):
         return
     motor_traducao = "deepl"
     salvar_config()
-    notificar("Motor: DeepL")
+    atualizar_icone_tray()
+    notificar("Motor ativo: DeepL")
 
 
 # ==========================
@@ -232,29 +244,35 @@ def inserir_api_deepl():
 # ==========================
 def notificar(msg):
     notification.notify(
-        title="Live Text Translator v1.2.0",
+        title="Live Text Translator v2.0",
         message=msg,
         timeout=2
     )
 
 
 # ==========================
-# TRAY ICON
+# TRAY
 # ==========================
 def iniciar_tray():
-    image = Image.open(resource_path("ico_verde.ico"))
+    global tray_icon
+
+    icone_inicial = "ico_google.ico"
+    if motor_traducao == "deepl":
+        icone_inicial = "ico_deepl.ico"
+
+    image = Image.open(resource_path(icone_inicial))
 
     menu = (
-        item("Motor Google", usar_google),
-        item("Motor DeepL", usar_deepl),
+        item("Motor Google ✅" if motor_traducao == "google" else "Motor Google", usar_google),
+        item("Motor DeepL ✅" if motor_traducao == "deepl" else "Motor DeepL", usar_deepl),
         item("Inserir API DeepL", lambda icon, item: inserir_api_deepl()),
         item("Hotkey Shift+Enter", lambda icon, item: atualizar_hotkey("shift+enter")),
         item("Hotkey Ctrl+Alt+T", lambda icon, item: atualizar_hotkey("ctrl+alt+t")),
         item("Sair", lambda icon, item: sys.exit())
     )
 
-    tray = pystray.Icon("LiveTranslator", image, "Live Text Translator", menu)
-    tray.run()
+    tray_icon = pystray.Icon("LiveTranslator", image, "Live Text Translator v2.0", menu)
+    tray_icon.run()
 
 
 # ==========================
@@ -268,9 +286,18 @@ def main():
     threading.Thread(target=iniciar_tray, daemon=True).start()
 
     root = tk.Tk()
-    root.title("Live Text Translator v1.2.0")
-    root.geometry("320x140")
-    tk.Label(root, text="Motor selecionável (Google / DeepL)").pack(pady=20)
+    root.title("Live Text Translator v2.0")
+    root.geometry("320x160")
+
+    status_label = tk.Label(root)
+    status_label.pack(pady=10)
+
+    def atualizar_status():
+        motor_nome = "DeepL" if motor_traducao == "deepl" else "Google"
+        status_label.config(text=f"Motor ativo: {motor_nome}")
+        root.after(1000, atualizar_status)
+
+    atualizar_status()
     root.mainloop()
 
 
